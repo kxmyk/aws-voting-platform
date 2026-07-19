@@ -15,6 +15,38 @@ if (!dbPassword) {
   throw new Error('DB_PASSWORD environment variable is required');
 }
 
+const pool = new Pool({
+  host: process.env.DB_HOST || 'db',
+  port: Number.parseInt(process.env.DB_PORT || '5432', 10),
+  database: process.env.DB_NAME || 'postgres',
+  user: process.env.DB_USER || 'postgres',
+  password: dbPassword
+});
+
+app.get('/health', function (request, response) {
+  response.status(200).json({
+    status: 'healthy',
+    service: 'result'
+  });
+});
+
+app.get('/ready', async function (request, response) {
+  try {
+    await pool.query('SELECT 1');
+
+    response.status(200).json({
+      status: 'ready',
+      service: 'result'
+    });
+  } catch (error) {
+    response.status(503).json({
+      status: 'not_ready',
+      service: 'result',
+      dependency: 'postgres'
+    });
+  }
+});
+
 io.on('connection', function (socket) {
   socket.emit('message', {
     text: 'Welcome!'
@@ -23,14 +55,6 @@ io.on('connection', function (socket) {
   socket.on('subscribe', function (data) {
     socket.join(data.channel);
   });
-});
-
-const pool = new Pool({
-  host: process.env.DB_HOST || 'db',
-  port: Number.parseInt(process.env.DB_PORT || '5432', 10),
-  database: process.env.DB_NAME || 'postgres',
-  user: process.env.DB_USER || 'postgres',
-  password: dbPassword
 });
 
 async.retry(
@@ -94,9 +118,13 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'views')));
 
 app.get('/', function (request, response) {
-  response.sendFile(path.resolve(__dirname, 'views/index.html'));
+  response.sendFile(
+    path.resolve(__dirname, 'views/index.html')
+  );
 });
 
 server.listen(port, function () {
-  console.log('App running on port ' + server.address().port);
+  console.log(
+    'App running on port ' + server.address().port
+  );
 });
