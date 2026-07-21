@@ -14,8 +14,15 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost"]
-      interval: 15s
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "http://localhost/ready"
+        ]
+      interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -28,17 +35,33 @@ services:
       - back-tier
 
   result:
-    build: ./result
+    build:
+      context: ./result
     environment:
       DB_HOST: ${DB_HOST:-db}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-postgres}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: "${DB_PASSWORD:?DB_PASSWORD must be set in .env}"
-    entrypoint: nodemon --inspect=0.0.0.0 server.js
+    entrypoint:
+      - nodemon
+      - --inspect=0.0.0.0
+      - server.js
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost/ready',res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       - ./result:/usr/local/app
     ports:
@@ -64,6 +87,16 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /tmp/worker-health && [ $$(( $$(date +%s) - $$(cat /tmp/worker-health) )) -lt 30 ]"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     networks:
       - back-tier
 
@@ -72,8 +105,14 @@ services:
     volumes:
       - "./healthchecks:/healthchecks"
     healthcheck:
-      test: /healthchecks/redis.sh
+      test:
+        [
+          "CMD",
+          "/healthchecks/redis.sh"
+        ]
       interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - back-tier
 
@@ -87,14 +126,22 @@ services:
       - "db-data:/var/lib/postgresql/data"
       - "./healthchecks:/healthchecks"
     healthcheck:
-      test: /healthchecks/postgres.sh
+      test:
+        [
+          "CMD",
+          "/healthchecks/postgres.sh"
+        ]
       interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - back-tier
 
   seed:
-    build: ./seed-data
-    profiles: ["seed"]
+    build:
+      context: ./seed-data
+    profiles:
+      - seed
     depends_on:
       vote:
         condition: service_healthy

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, make_response, g
+from flask import Flask, render_template, request, make_response, g, jsonify
 from redis import Redis
 
 import json
@@ -37,6 +37,36 @@ def get_redis():
         )
 
     return g.redis
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify(
+        status="healthy",
+        service="vote",
+    ), 200
+
+
+@app.route("/ready", methods=["GET"])
+def ready():
+    try:
+        get_redis().ping()
+    except Exception as error:
+        app.logger.warning(
+            "Redis readiness check failed: %s",
+            error,
+        )
+
+        return jsonify(
+            status="not_ready",
+            service="vote",
+            dependency="redis",
+        ), 503
+
+    return jsonify(
+        status="ready",
+        service="vote",
+    ), 200
 
 
 @app.route("/", methods=["POST", "GET"])

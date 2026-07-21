@@ -1,5 +1,6 @@
 using System;
 using System.Data.Common;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -12,31 +13,50 @@ namespace Worker
 {
     public class Program
     {
+        private const string HealthFilePath =
+            "/tmp/worker-health";
+
         public static int Main(string[] args)
         {
             try
             {
-                var dbHost = GetEnvironmentVariable("DB_HOST", "db");
-                var dbPort = int.Parse(
-                    GetEnvironmentVariable("DB_PORT", "5432")
+                var dbHost = GetEnvironmentVariable(
+                    "DB_HOST",
+                    "db"
                 );
+
+                var dbPort = int.Parse(
+                    GetEnvironmentVariable(
+                        "DB_PORT",
+                        "5432"
+                    )
+                );
+
                 var dbName = GetEnvironmentVariable(
                     "DB_NAME",
                     "postgres"
                 );
+
                 var dbUser = GetEnvironmentVariable(
                     "DB_USER",
                     "postgres"
                 );
+
                 var dbPassword =
-                    GetRequiredEnvironmentVariable("DB_PASSWORD");
+                    GetRequiredEnvironmentVariable(
+                        "DB_PASSWORD"
+                    );
 
                 var redisHost = GetEnvironmentVariable(
                     "REDIS_HOST",
                     "redis"
                 );
+
                 var redisPort = int.Parse(
-                    GetEnvironmentVariable("REDIS_PORT", "6379")
+                    GetEnvironmentVariable(
+                        "REDIS_PORT",
+                        "6379"
+                    )
                 );
 
                 var dbConnectionString =
@@ -49,15 +69,24 @@ namespace Worker
                         Password = dbPassword
                     }.ConnectionString;
 
-                var pgsql =
-                    OpenDbConnection(dbConnectionString);
+                var pgsql = OpenDbConnection(
+                    dbConnectionString
+                );
 
                 var redisConnection =
-                    OpenRedisConnection(redisHost, redisPort);
+                    OpenRedisConnection(
+                        redisHost,
+                        redisPort
+                    );
 
-                var redis = redisConnection.GetDatabase();
+                var redis =
+                    redisConnection.GetDatabase();
+
                 var keepAliveCommand =
                     CreateKeepAliveCommand(pgsql);
+
+                var lastDatabaseKeepAlive =
+                    DateTime.UtcNow;
 
                 var voteDefinition = new
                 {
@@ -65,13 +94,19 @@ namespace Worker
                     voter_id = ""
                 };
 
+                WriteHealthTimestamp();
+
                 while (true)
                 {
                     Thread.Sleep(100);
 
                     if (!redisConnection.IsConnected)
                     {
-                        Console.WriteLine("Reconnecting Redis");
+                        Console.WriteLine(
+                            "Reconnecting Redis"
+                        );
+
+                        redisConnection.Dispose();
 
                         redisConnection =
                             OpenRedisConnection(
@@ -79,19 +114,60 @@ namespace Worker
                                 redisPort
                             );
 
-                        redis = redisConnection.GetDatabase();
+                        redis =
+                            redisConnection.GetDatabase();
                     }
 
-                    string json =
-                        redis.ListLeftPopAsync("votes").Result;
+                    if (
+                        pgsql.State
+                        != System.Data.ConnectionState.Open
+                    )
+                    {
+                        Console.WriteLine(
+                            "Reconnecting DB"
+                        );
+
+                        keepAliveCommand.Dispose();
+                        pgsql.Dispose();
+
+                        pgsql = OpenDbConnection(
+                            dbConnectionString
+                        );
+
+                        keepAliveCommand =
+                            CreateKeepAliveCommand(pgsql);
+
+                        lastDatabaseKeepAlive =
+                            DateTime.UtcNow;
+                    }
+
+                    string json;
+
+                    try
+                    {
+                        json = redis
+                            .ListLeftPopAsync("votes")
+                            .Result;
+                    }
+                    catch (RedisException error)
+                    {
+                        Console.Error.WriteLine(
+                            $"Redis operation failed: " +
+                            $"{error.Message}"
+                        );
+
+                        Thread.Sleep(1000);
+                        continue;
+                    }
 
                     if (json != null)
                     {
                         var vote =
-                            JsonConvert.DeserializeAnonymousType(
-                                json,
-                                voteDefinition
-                            );
+                            JsonConvert
+                                .DeserializeAnonymousType(
+                                    json,
+                                    voteDefinition
+                                );
 
                         if (vote == null)
                         {
@@ -103,30 +179,10 @@ namespace Worker
                         }
 
                         Console.WriteLine(
-                            $"Processing vote for '{vote.vote}' " +
-                            $"by '{vote.voter_id}'"
+                            $"Processing vote for " +
+                            $"'{vote.vote}' by " +
+                            $"'{vote.voter_id}'"
                         );
-
-                        if (
-                            pgsql.State
-                            != System.Data.ConnectionState.Open
-                        )
-                        {
-                            Console.WriteLine(
-                                "Reconnecting DB"
-                            );
-
-                            keepAliveCommand.Dispose();
-                            pgsql.Dispose();
-
-                            pgsql =
-                                OpenDbConnection(
-                                    dbConnectionString
-                                );
-
-                            keepAliveCommand =
-                                CreateKeepAliveCommand(pgsql);
-                        }
 
                         UpdateVote(
                             pgsql,
@@ -134,31 +190,32 @@ namespace Worker
                             vote.vote
                         );
                     }
-                    else
+                    else if (
+                        DateTime.UtcNow
+                        - lastDatabaseKeepAlive
+                        >= TimeSpan.FromSeconds(10)
+                    )
                     {
                         try
                         {
-                            keepAliveCommand.ExecuteNonQuery();
+                            keepAliveCommand
+                                .ExecuteNonQuery();
+
+                            lastDatabaseKeepAlive =
+                                DateTime.UtcNow;
                         }
                         catch (DbException)
                         {
                             Console.WriteLine(
-                                "Database keep-alive failed. " +
-                                "Reconnecting DB"
+                                "Database keep-alive " +
+                                "failed"
                             );
 
-                            keepAliveCommand.Dispose();
-                            pgsql.Dispose();
-
-                            pgsql =
-                                OpenDbConnection(
-                                    dbConnectionString
-                                );
-
-                            keepAliveCommand =
-                                CreateKeepAliveCommand(pgsql);
+                            continue;
                         }
                     }
+
+                    WriteHealthTimestamp();
                 }
             }
             catch (Exception exception)
@@ -173,30 +230,47 @@ namespace Worker
             string defaultValue
         )
         {
-            return Environment.GetEnvironmentVariable(name)
+            return Environment
+                .GetEnvironmentVariable(name)
                 ?? defaultValue;
         }
 
-        private static string GetRequiredEnvironmentVariable(
-            string name
-        )
+        private static string
+            GetRequiredEnvironmentVariable(
+                string name
+            )
         {
-            var value =
-                Environment.GetEnvironmentVariable(name);
+            var value = Environment
+                .GetEnvironmentVariable(name);
 
             if (string.IsNullOrWhiteSpace(value))
             {
                 throw new InvalidOperationException(
-                    $"Environment variable {name} is required"
+                    $"Environment variable " +
+                    $"{name} is required"
                 );
             }
 
             return value;
         }
 
-        private static NpgsqlConnection OpenDbConnection(
-            string connectionString
-        )
+        private static void WriteHealthTimestamp()
+        {
+            var timestamp = DateTimeOffset
+                .UtcNow
+                .ToUnixTimeSeconds()
+                .ToString();
+
+            File.WriteAllText(
+                HealthFilePath,
+                timestamp
+            );
+        }
+
+        private static NpgsqlConnection
+            OpenDbConnection(
+                string connectionString
+            )
         {
             NpgsqlConnection connection;
 
@@ -205,31 +279,45 @@ namespace Worker
                 try
                 {
                     connection =
-                        new NpgsqlConnection(connectionString);
+                        new NpgsqlConnection(
+                            connectionString
+                        );
 
                     connection.Open();
                     break;
                 }
                 catch (SocketException)
                 {
-                    Console.Error.WriteLine("Waiting for db");
+                    Console.Error.WriteLine(
+                        "Waiting for db"
+                    );
+
                     Thread.Sleep(1000);
                 }
                 catch (DbException)
                 {
-                    Console.Error.WriteLine("Waiting for db");
+                    Console.Error.WriteLine(
+                        "Waiting for db"
+                    );
+
                     Thread.Sleep(1000);
                 }
             }
 
-            Console.Error.WriteLine("Connected to db");
+            Console.Error.WriteLine(
+                "Connected to db"
+            );
 
-            using var command = connection.CreateCommand();
+            using var command =
+                connection.CreateCommand();
 
             command.CommandText = @"
                 CREATE TABLE IF NOT EXISTS votes (
-                    id VARCHAR(255) NOT NULL UNIQUE,
-                    vote VARCHAR(255) NOT NULL
+                    id VARCHAR(255)
+                        NOT NULL
+                        UNIQUE,
+                    vote VARCHAR(255)
+                        NOT NULL
                 )
             ";
 
@@ -238,25 +326,30 @@ namespace Worker
             return connection;
         }
 
-        private static DbCommand CreateKeepAliveCommand(
-            NpgsqlConnection connection
-        )
+        private static DbCommand
+            CreateKeepAliveCommand(
+                NpgsqlConnection connection
+            )
         {
-            var command = connection.CreateCommand();
+            var command =
+                connection.CreateCommand();
+
             command.CommandText = "SELECT 1";
 
             return command;
         }
 
-        private static ConnectionMultiplexer OpenRedisConnection(
-            string hostname,
-            int port
-        )
+        private static ConnectionMultiplexer
+            OpenRedisConnection(
+                string hostname,
+                int port
+            )
         {
             var ipAddress = GetIp(hostname);
 
             Console.WriteLine(
-                $"Found Redis at {ipAddress}:{port}"
+                $"Found Redis at " +
+                $"{ipAddress}:{port}"
             );
 
             while (true)
@@ -267,9 +360,10 @@ namespace Worker
                         "Connecting to Redis"
                     );
 
-                    return ConnectionMultiplexer.Connect(
-                        $"{ipAddress}:{port}"
-                    );
+                    return ConnectionMultiplexer
+                        .Connect(
+                            $"{ipAddress}:{port}"
+                        );
                 }
                 catch (RedisConnectionException)
                 {
@@ -282,7 +376,9 @@ namespace Worker
             }
         }
 
-        private static string GetIp(string hostname)
+        private static string GetIp(
+            string hostname
+        )
         {
             return Dns
                 .GetHostEntryAsync(hostname)
@@ -302,13 +398,20 @@ namespace Worker
             string vote
         )
         {
-            using var command = connection.CreateCommand();
+            using var command =
+                connection.CreateCommand();
 
             try
             {
                 command.CommandText = @"
-                    INSERT INTO votes (id, vote)
-                    VALUES (@id, @vote)
+                    INSERT INTO votes (
+                        id,
+                        vote
+                    )
+                    VALUES (
+                        @id,
+                        @vote
+                    )
                 ";
 
                 command.Parameters.AddWithValue(
