@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:7.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
@@ -6,41 +6,34 @@ ARG TARGETARCH
 
 RUN echo "Build platform: ${BUILDPLATFORM}" \
     && echo "Target platform: ${TARGETPLATFORM}" \
-    && echo "Docker target architecture: ${TARGETARCH}"
+    && echo "Docker architecture: ${TARGETARCH}"
 
 WORKDIR /source
 
 COPY Worker.csproj ./
 
 RUN case "${TARGETARCH}" in \
-        amd64) RID="linux-x64" ;; \
-        arm64) RID="linux-arm64" ;; \
+        amd64) echo "linux-x64" > /tmp/runtime-id ;; \
+        arm64) echo "linux-arm64" > /tmp/runtime-id ;; \
         *) \
-            echo "Unsupported target architecture: ${TARGETARCH}"; \
+            echo "Unsupported architecture: ${TARGETARCH}"; \
             exit 1 ;; \
     esac \
-    && echo "Restoring project for runtime: ${RID}" \
-    && dotnet restore Worker.csproj \
-        --runtime "${RID}"
+    && echo "Selected runtime: $(cat /tmp/runtime-id)"
+
+RUN dotnet restore Worker.csproj \
+    --runtime "$(cat /tmp/runtime-id)"
 
 COPY . .
 
-RUN case "${TARGETARCH}" in \
-        amd64) RID="linux-x64" ;; \
-        arm64) RID="linux-arm64" ;; \
-        *) \
-            echo "Unsupported target architecture: ${TARGETARCH}"; \
-            exit 1 ;; \
-    esac \
-    && echo "Publishing project for runtime: ${RID}" \
-    && dotnet publish Worker.csproj \
-        --configuration Release \
-        --output /app \
-        --runtime "${RID}" \
-        --self-contained false \
-        --no-restore
+RUN dotnet publish Worker.csproj \
+    --configuration Release \
+    --output /app \
+    --runtime "$(cat /tmp/runtime-id)" \
+    --self-contained false \
+    --no-restore
 
-FROM mcr.microsoft.com/dotnet/runtime:7.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
 
 WORKDIR /app
 
