@@ -1,0 +1,38 @@
+name: Compose Integration Test
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-test:
+    name: Full application flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      COMPOSE_PROJECT_NAME: aws-voting-platform-ci
+      DB_PASSWORD: ci-integration-only-password
+      OPTION_A: Cats
+      OPTION_B: Dogs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Run Docker Compose integration test
+        run: ./scripts/compose-integration-test.sh
