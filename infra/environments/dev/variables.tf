@@ -35,3 +35,59 @@ variable "environment" {
     error_message = "environment must be one of: dev, staging, prod."
   }
 }
+
+variable "vpc_cidr" {
+  description = "IPv4 CIDR block assigned to the development VPC."
+  type        = string
+  default     = "10.20.0.0/16"
+
+  validation {
+    condition     = can(cidrnetmask(var.vpc_cidr))
+    error_message = "vpc_cidr must be a valid IPv4 CIDR block."
+  }
+}
+
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks assigned to public subnets."
+  type        = list(string)
+
+  default = [
+    "10.20.0.0/24",
+    "10.20.1.0/24"
+  ]
+}
+
+variable "private_app_subnet_cidrs" {
+  description = "CIDR blocks assigned to private application subnets."
+  type        = list(string)
+
+  default = [
+    "10.20.10.0/24",
+    "10.20.11.0/24"
+  ]
+}
+
+variable "private_data_subnet_cidrs" {
+  description = "CIDR blocks assigned to private data subnets."
+  type        = list(string)
+
+  default = [
+    "10.20.20.0/24",
+    "10.20.21.0/24"
+  ]
+}
+
+variable "nat_gateway_mode" {
+  description = "NAT Gateway deployment mode: none, single, or per_az."
+  type        = string
+  default     = "single"
+
+  validation {
+    condition = contains(
+      ["none", "single", "per_az"],
+      var.nat_gateway_mode
+    )
+
+    error_message = "nat_gateway_mode must be one of: none, single, per_az."
+  }
+}
