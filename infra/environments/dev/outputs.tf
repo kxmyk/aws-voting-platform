@@ -72,3 +72,38 @@ output "nat_gateway_public_ips" {
   description = "Public IP addresses assigned to NAT Gateways."
   value       = module.network.nat_gateway_public_ips
 }
+
+output "alb_security_group_id" {
+  description = "Security group ID assigned to the Application Load Balancer."
+  value       = module.security.alb_security_group_id
+}
+
+output "vote_security_group_id" {
+  description = "Security group ID assigned to the vote application."
+  value       = module.security.vote_security_group_id
+}
+
+output "result_security_group_id" {
+  description = "Security group ID assigned to the result application."
+  value       = module.security.result_security_group_id
+}
+
+output "worker_security_group_id" {
+  description = "Security group ID assigned to the worker."
+  value       = module.security.worker_security_group_id
+}
+
+output "redis_security_group_id" {
+  description = "Security group ID assigned to Redis."
+  value       = module.security.redis_security_group_id
+}
+
+output "postgres_security_group_id" {
+  description = "Security group ID assigned to PostgreSQL."
+  value       = module.security.postgres_security_group_id
+}
+
+output "security_group_ids" {
+  description = "Map of security group IDs created for the application."
+  value       = module.security.security_group_ids
+}
