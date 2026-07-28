@@ -91,3 +91,30 @@ variable "nat_gateway_mode" {
     error_message = "nat_gateway_mode must be one of: none, single, per_az."
   }
 }
+
+variable "alb_ingress_ipv4_cidrs" {
+  description = "IPv4 CIDR blocks allowed to access the public Application Load Balancer."
+  type        = list(string)
+
+  default = [
+    "0.0.0.0/0"
+  ]
+
+  validation {
+    condition = (
+      length(var.alb_ingress_ipv4_cidrs) > 0 &&
+      alltrue([
+        for cidr in var.alb_ingress_ipv4_cidrs :
+        can(cidrnetmask(cidr))
+      ])
+    )
+
+    error_message = "alb_ingress_ipv4_cidrs must contain at least one valid IPv4 CIDR block."
+  }
+}
+
+variable "enable_https_ingress" {
+  description = "Whether HTTPS ingress is allowed to the Application Load Balancer."
+  type        = bool
+  default     = false
+}
