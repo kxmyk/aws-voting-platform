@@ -1,0 +1,7 @@
+# Retrieve these values with:
+#
+# gh api repos/OWNER/REPOSITORY \
+#   --jq '{github_owner_id: (.owner.id | tostring), github_repository_id: (.id | tostring)}'
+
+github_owner_id      = "replace-with-github-owner-id"
+github_repository_id = "replace-with-github-repository-id"

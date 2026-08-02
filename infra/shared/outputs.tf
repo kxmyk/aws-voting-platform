@@ -33,6 +33,36 @@ output "worker_repository_url" {
   value       = module.ecr.repository_urls["worker"]
 }
 
+output "github_oidc_provider_arn" {
+  description = "ARN of the GitHub Actions OIDC identity provider."
+  value       = aws_iam_openid_connect_provider.github.arn
+}
+
+output "github_actions_ecr_push_role_name" {
+  description = "Name of the IAM role assumed by GitHub Actions."
+  value       = aws_iam_role.github_actions_ecr_push.name
+}
+
+output "github_actions_ecr_push_role_arn" {
+  description = "ARN of the IAM role assumed by GitHub Actions."
+  value       = aws_iam_role.github_actions_ecr_push.arn
+}
+
+output "github_actions_ecr_push_policy_arn" {
+  description = "ARN of the least-privilege ECR publishing policy."
+  value       = aws_iam_policy.github_actions_ecr_push.arn
+}
+
+output "github_oidc_subjects" {
+  description = "Exact GitHub OIDC subjects allowed to assume the publishing role."
+  value       = local.github_oidc_subjects
+}
+
+output "github_main_oidc_subject" {
+  description = "Exact immutable GitHub OIDC subject for the main branch."
+  value       = local.github_main_oidc_subject
+}
+
 output "terraform_state_key" {
   description = "S3 object key used by the shared Terraform root module."
   value       = "shared/terraform.tfstate"
