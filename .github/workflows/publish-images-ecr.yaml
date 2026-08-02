@@ -1,0 +1,182 @@
+name: Publish images to Amazon ECR
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "vote/**"
+      - "result/**"
+      - "worker/**"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ecr-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_NAMESPACE: aws-voting-platform
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - service: vote
+            context: ./vote
+
+          - service: result
+            context: ./result
+
+          - service: worker
+            context: ./worker
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate workflow configuration
+        shell: bash
+        env:
+          AWS_ECR_PUSH_ROLE_ARN: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${AWS_ECR_PUSH_ROLE_ARN}" ]]; then
+            echo "GitHub repository variable AWS_ECR_PUSH_ROLE_ARN is not configured."
+            exit 1
+          fi
+
+      - name: Configure temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          role-session-name: ecr-publish-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          aws sts get-caller-identity
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Prepare image metadata
+        id: image
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SERVICE_NAME: ${{ matrix.service }}
+        run: |
+          set -Eeuo pipefail
+
+          SHORT_SHA="${GITHUB_SHA:0:12}"
+          IMAGE_TAG="sha-${SHORT_SHA}"
+          REPOSITORY="${ECR_NAMESPACE}/${SERVICE_NAME}"
+          IMAGE_URI="${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
+
+          echo "tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "repository=${REPOSITORY}" >> "${GITHUB_OUTPUT}"
+          echo "uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+
+          if aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${REPOSITORY}" \
+            --image-ids "imageTag=${IMAGE_TAG}" \
+            > /dev/null 2>&1; then
+
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            echo "Image already exists: ${IMAGE_URI}"
+          else
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            echo "Image will be built and published: ${IMAGE_URI}"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push image
+        id: build
+        if: steps.image.outputs.exists != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          platforms: linux/amd64
+
+          tags: |
+            ${{ steps.image.outputs.uri }}
+
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+          provenance: false
+          sbom: false
+
+      - name: Verify published image
+        shell: bash
+        env:
+          REPOSITORY: ${{ steps.image.outputs.repository }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+        run: |
+          set -Eeuo pipefail
+
+          aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${REPOSITORY}" \
+            --image-ids "imageTag=${IMAGE_TAG}" \
+            --query 'imageDetails[0].{
+              Tags:imageTags,
+              Digest:imageDigest,
+              PushedAt:imagePushedAt,
+              SizeBytes:imageSizeInBytes
+            }' \
+            --output table
+
+      - name: Add existing image to summary
+        if: steps.image.outputs.exists == 'true'
+        shell: bash
+        run: |
+          {
+            echo "## ${{ matrix.service }}"
+            echo
+            echo "Image already existed and was not rebuilt:"
+            echo
+            echo "\`${{ steps.image.outputs.uri }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Add published image to summary
+        if: steps.image.outputs.exists != 'true'
+        shell: bash
+        run: |
+          {
+            echo "## ${{ matrix.service }}"
+            echo
+            echo "Published image:"
+            echo
+            echo "\`${{ steps.image.outputs.uri }}\`"
+            echo
+            echo "Digest:"
+            echo
+            echo "\`${{ steps.build.outputs.digest }}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

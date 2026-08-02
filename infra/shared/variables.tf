@@ -57,3 +57,51 @@ variable "untagged_image_expiration_days" {
     error_message = "untagged_image_expiration_days must be at least 1."
   }
 }
+
+variable "github_owner" {
+  description = "GitHub account or organization that owns the repository."
+  type        = string
+  default     = "kxmyk"
+
+  validation {
+    condition = (
+      length(var.github_owner) >= 1 &&
+      length(var.github_owner) <= 100 &&
+      can(regex("^[A-Za-z0-9-]+$", var.github_owner))
+    )
+
+    error_message = "github_owner must contain only letters, numbers, and hyphens."
+  }
+}
+
+variable "github_repository" {
+  description = "GitHub repository allowed to assume the AWS IAM role."
+  type        = string
+  default     = "aws-voting-platform"
+
+  validation {
+    condition = (
+      length(var.github_repository) >= 1 &&
+      length(var.github_repository) <= 100 &&
+      can(regex("^[A-Za-z0-9_.-]+$", var.github_repository))
+    )
+
+    error_message = "github_repository contains unsupported characters."
+  }
+}
+
+variable "github_deployment_branch" {
+  description = "GitHub branch allowed to publish images to ECR."
+  type        = string
+  default     = "main"
+
+  validation {
+    condition = (
+      length(var.github_deployment_branch) >= 1 &&
+      length(var.github_deployment_branch) <= 255 &&
+      can(regex("^[A-Za-z0-9._/-]+$", var.github_deployment_branch))
+    )
+
+    error_message = "github_deployment_branch contains unsupported characters."
+  }
+}
