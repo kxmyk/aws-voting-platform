@@ -2,219 +2,442 @@
 
 A cloud engineering and DevOps portfolio project based on Docker's Example Voting App.
 
-The project demonstrates how a simple distributed application can be prepared for deployment on AWS using Docker, Terraform, Ansible, CI/CD, managed AWS services, observability, security controls, and infrastructure automation.
+The project demonstrates how a distributed application can be prepared, tested, containerized and incrementally deployed to AWS using Docker, Terraform, GitHub Actions, OpenID Connect, Amazon ECR, Amazon ECS, AWS Fargate, CloudWatch and least-privilege IAM.
 
 Repository: [kxmyk/aws-voting-platform](https://github.com/kxmyk/aws-voting-platform)
 
-## Project overview
+## Project status
+
+| Area | Status |
+| --- | --- |
+| Local Docker Compose baseline | Complete |
+| Cloud-ready application changes | Complete |
+| Terraform bootstrap and remote state | Complete |
+| Multi-AZ VPC and security groups | Complete |
+| Amazon ECR repositories | Complete |
+| GitHub Actions OIDC federation | Complete |
+| Automated image publishing to ECR | Complete |
+| ECS cluster foundation | Complete |
+| RDS PostgreSQL and ElastiCache Redis | Planned |
+| ECS task definitions and services | Planned |
+| Application Load Balancer | Planned |
+| Automated ECS deployment | Planned |
+| Full observability and reliability testing | Planned |
+
+Development infrastructure is intentionally created for testing and destroyed after work sessions. Persistent shared resources, such as the Terraform state bucket, ECR repositories and GitHub OIDC integration, are managed in separate Terraform states.
+
+## Project goals
+
+The project focuses on practical Cloud and DevOps engineering skills:
+
+- operating a multi-service container application;
+- preparing applications for managed cloud environments;
+- designing AWS networking and security boundaries;
+- managing infrastructure with reusable Terraform modules;
+- separating persistent shared infrastructure from temporary environments;
+- authenticating CI/CD through temporary OIDC credentials;
+- applying least-privilege IAM;
+- publishing immutable and traceable container images;
+- building an Amazon ECS and AWS Fargate architecture;
+- controlling AWS costs during development;
+- documenting architecture and operations.
+
+Kubernetes is intentionally not required. The target runtime is Amazon ECS with AWS Fargate.
+
+## Application overview
 
 The application allows users to vote between two options and view the results in real time.
 
-Although the business logic is intentionally simple, the application consists of multiple services written in different technologies:
-
-* Python and Flask for receiving votes;
-* Redis as a message queue;
-* .NET for background vote processing;
-* PostgreSQL for persistent storage;
-* Node.js for displaying live results.
-
-This makes the application a useful foundation for practicing containerization, distributed systems, infrastructure as code, cloud networking, CI/CD, monitoring, and operational reliability.
-
-## Architecture
+| Component | Technology | Responsibility |
+| --- | --- | --- |
+| `vote` | Python / Flask | Receives votes and places them in Redis |
+| `redis` | Redis | Temporarily queues submitted votes |
+| `worker` | .NET 10 | Consumes votes and stores them in PostgreSQL |
+| `db` | PostgreSQL | Stores voting data |
+| `result` | Node.js | Reads and displays results in real time |
 
 ```mermaid
 flowchart LR
     User[User browser]
-
-    Vote[Vote application<br/>Python / Flask]
-    Redis[(Redis<br/>Vote queue)]
-    Worker[Worker<br/>.NET]
-    Database[(PostgreSQL<br/>Persistent storage)]
-    Result[Result application<br/>Node.js]
+    Vote[Vote<br/>Python / Flask]
+    Redis[(Redis)]
+    Worker[Worker<br/>.NET 10]
+    Database[(PostgreSQL)]
+    Result[Result<br/>Node.js]
 
     User -->|Submit vote| Vote
-    Vote -->|Push vote| Redis
-    Redis -->|Consume vote| Worker
-    Worker -->|Insert or update vote| Database
-    Database -->|Read aggregated results| Result
-    Result -->|Display live results| User
+    Vote --> Redis
+    Redis --> Worker
+    Worker --> Database
+    Database --> Result
+    Result --> User
 ```
 
-### Application components
-
-| Component | Technology     | Responsibility                                          |
-| --------- | -------------- | ------------------------------------------------------- |
-| `vote`    | Python / Flask | Receives votes from users and sends them to Redis       |
-| `redis`   | Redis          | Temporarily queues submitted votes                      |
-| `worker`  | .NET 10        | Consumes votes from Redis and stores them in PostgreSQL |
-| `db`      | PostgreSQL     | Stores the current vote for every browser client        |
-| `result`  | Node.js        | Reads and displays voting results in real time          |
-
-## Data flow
-
-1. A user opens the `vote` application.
-2. The user selects one of the available options.
-3. The application creates a vote message containing the browser identifier and selected option.
-4. The vote message is pushed to a Redis list.
-5. The .NET worker waits for messages in Redis.
-6. The worker consumes the vote and writes it to PostgreSQL.
-7. The `result` application reads aggregated values from PostgreSQL.
-8. Updated results are displayed in the user's browser.
-
-The application uses a producer-consumer architecture:
+The core data flow is:
 
 ```text
 vote → Redis → worker → PostgreSQL → result
 ```
 
-Where:
-
-* `vote` is the producer;
-* Redis is the queue;
-* `worker` is the consumer;
-* PostgreSQL is the persistent data store;
-* `result` is the read and presentation layer.
-
 ## Local development
 
 ### Requirements
 
-Install:
-
-* Docker Engine;
-* Docker Compose v2;
-* Git.
-
-Verify the installation:
+- Docker Engine
+- Docker Compose v2
+- Git
 
 ```bash
 docker version
 docker compose version
+git version
 ```
 
 ### Configuration
-
-Copy the example environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Set a local PostgreSQL password in `.env`:
+Set a local PostgreSQL password:
 
 ```dotenv
 DB_PASSWORD=replace-with-a-local-development-password
 ```
 
-Do not commit the `.env` file.
+Do not commit `.env`.
 
-Application configuration is provided through environment variables instead of being hardcoded in source code.
-
-### Start the application
-
-Validate the Compose configuration:
+### Start the stack
 
 ```bash
 docker compose config
-```
-
-Build the images:
-
-```bash
 docker compose build
-```
-
-Start the complete application stack:
-
-```bash
 docker compose up --detach --wait
 ```
 
-The applications will be available at:
+| Application | URL |
+| --- | --- |
+| Vote | http://localhost:8080 |
+| Results | http://localhost:8081 |
 
-| Application | URL                   |
-| ----------- | --------------------- |
-| Vote        | http://localhost:8080 |
-| Results     | http://localhost:8081 |
-
-View running services:
+Useful commands:
 
 ```bash
 docker compose ps
-```
-
-View logs:
-
-```bash
 docker compose logs --follow
-```
-
-Stop the application:
-
-```bash
 docker compose down
-```
-
-Stop the application and remove local volumes:
-
-```bash
 docker compose down --volumes
 ```
 
-Removing volumes deletes locally stored PostgreSQL and Redis data.
+Removing volumes deletes local PostgreSQL and Redis data.
 
-## Health and readiness checks
+## Health and readiness
 
-The web applications expose separate liveness and readiness endpoints.
-
-### Vote application
+### Vote
 
 ```text
 GET http://localhost:8080/health
 GET http://localhost:8080/ready
 ```
 
-The readiness endpoint verifies that the application can communicate with Redis.
+Readiness verifies connectivity to Redis.
 
-### Result application
+### Result
 
 ```text
 GET http://localhost:8081/health
 GET http://localhost:8081/ready
 ```
 
-The readiness endpoint verifies that the application can communicate with PostgreSQL.
+Readiness verifies connectivity to PostgreSQL.
 
 ### Worker
 
-The worker does not expose an HTTP server.
+The worker periodically updates a heartbeat file. Its container health check verifies that the heartbeat timestamp is recent.
 
-Instead, it periodically updates a heartbeat file inside the container. The Docker health check verifies that the heartbeat timestamp is recent.
+The application services also:
 
-This allows Docker to detect a worker process that is running but no longer actively processing its execution loop.
+- log to standard output and standard error;
+- handle termination signals;
+- run as non-root users;
+- use pinned base-image versions;
+- read service configuration from environment variables.
 
-## Integration test
+## Automated testing
 
-The repository contains an automated Docker Compose integration test:
+Run the complete Compose integration test:
 
 ```bash
 ./scripts/compose-integration-test.sh
 ```
 
-The test:
+The test validates configuration, builds the images, starts the stack, waits for health checks, submits a vote, verifies persistence in PostgreSQL, checks the worker heartbeat and removes test resources.
 
-* validates the Docker Compose configuration;
-* builds all application images;
-* starts the complete stack;
-* waits for container health checks;
-* checks application health and readiness endpoints;
-* submits a test vote;
-* verifies that the vote reaches PostgreSQL;
-* verifies the worker heartbeat;
-* prints diagnostic logs on failure;
-* removes containers and test volumes after completion.
+The same integration flow runs in GitHub Actions.
 
-The same test is executed in GitHub Actions.
+## Current AWS architecture
+
+The project uses three Terraform roots:
+
+```text
+infra/bootstrap
+    └── persistent S3 backend bucket
+
+infra/shared
+    ├── persistent ECR repositories
+    ├── GitHub OIDC provider
+    └── GitHub Actions ECR publishing role
+
+infra/environments/dev
+    ├── temporary VPC and subnets
+    ├── routing and NAT configuration
+    ├── security groups
+    ├── ECS cluster
+    ├── Fargate capacity providers
+    ├── CloudWatch log groups
+    └── ECS IAM roles
+```
+
+```mermaid
+flowchart TB
+    GitHub[GitHub Actions]
+    OIDC[GitHub OIDC Provider]
+    STS[AWS STS]
+    PublishRole[IAM ECR publishing role]
+
+    ECRVote[Amazon ECR<br/>vote]
+    ECRResult[Amazon ECR<br/>result]
+    ECRWorker[Amazon ECR<br/>worker]
+
+    State[(Amazon S3<br/>Terraform state)]
+
+    VPC[Development VPC]
+    Public[Public subnets<br/>2 AZs]
+    App[Private application subnets<br/>2 AZs]
+    Data[Private data subnets<br/>2 AZs]
+
+    ECS[Amazon ECS cluster]
+    Fargate[FARGATE]
+    Spot[FARGATE_SPOT]
+    Logs[CloudWatch Logs]
+
+    GitHub -->|OIDC JWT| OIDC
+    OIDC --> STS
+    STS --> PublishRole
+    PublishRole --> ECRVote
+    PublishRole --> ECRResult
+    PublishRole --> ECRWorker
+
+    State -. Terraform backend .-> VPC
+    VPC --> Public
+    VPC --> App
+    VPC --> Data
+    App --> ECS
+    ECS --> Fargate
+    ECS --> Spot
+    ECS --> Logs
+```
+
+This diagram represents the implemented foundation. ECS task definitions, ECS services, the Application Load Balancer, RDS and ElastiCache are the next layers.
+
+## Terraform structure
+
+```text
+infra/
+├── bootstrap/
+├── shared/
+├── environments/
+│   └── dev/
+└── modules/
+    ├── ecr/
+    ├── ecs/
+    ├── network/
+    └── security/
+```
+
+### Bootstrap
+
+`infra/bootstrap` creates the persistent S3 bucket used for Terraform state.
+
+It includes:
+
+- versioning;
+- server-side encryption;
+- S3 Block Public Access;
+- bucket-owner-enforced object ownership;
+- a policy denying insecure transport;
+- protection against accidental destruction;
+- common tags.
+
+### Shared infrastructure
+
+`infra/shared` manages persistent resources:
+
+- ECR repositories for `vote`, `result` and `worker`;
+- immutable image tags;
+- scan-on-push;
+- encryption;
+- lifecycle policies;
+- GitHub OIDC provider;
+- least-privilege IAM role for image publishing.
+
+State key:
+
+```text
+shared/terraform.tfstate
+```
+
+### Development environment
+
+`infra/environments/dev` manages temporary resources:
+
+- VPC;
+- public subnets;
+- private application subnets;
+- private data subnets;
+- Internet Gateway;
+- route tables;
+- configurable NAT Gateway mode;
+- least-privilege security groups;
+- ECS cluster;
+- Fargate and Fargate Spot capacity providers;
+- CloudWatch log groups;
+- ECS Task Execution Role;
+- separate Task Roles for application services.
+
+State key:
+
+```text
+environments/dev/terraform.tfstate
+```
+
+## Networking
+
+```text
+VPC: 10.20.0.0/16
+
+Public:
+- 10.20.0.0/24
+- 10.20.1.0/24
+
+Private application:
+- 10.20.10.0/24
+- 10.20.11.0/24
+
+Private data:
+- 10.20.20.0/24
+- 10.20.21.0/24
+```
+
+The network spans two Availability Zones.
+
+Supported NAT modes:
+
+```text
+none
+single
+per_az
+```
+
+Security-group paths:
+
+```text
+Internet → ALB:80/443
+ALB → Vote:80
+ALB → Result:80
+Vote → Redis:6379
+Worker → Redis:6379
+Worker → PostgreSQL:5432
+Result → PostgreSQL:5432
+```
+
+Redis and PostgreSQL do not accept public traffic.
+
+## Amazon ECR
+
+Private repositories:
+
+```text
+aws-voting-platform/vote
+aws-voting-platform/result
+aws-voting-platform/worker
+```
+
+Each repository uses:
+
+- immutable tags;
+- scan-on-push;
+- AES-256 encryption;
+- cleanup of untagged images;
+- a maximum retained image count.
+
+Images are tagged with the source commit:
+
+```text
+sha-<first-12-characters-of-git-sha>
+```
+
+## GitHub Actions and AWS OIDC
+
+GitHub Actions publishes images without long-lived AWS access keys.
+
+```text
+GitHub Actions
+    ↓ requests OIDC JWT
+GitHub OIDC provider
+    ↓
+AWS STS AssumeRoleWithWebIdentity
+    ↓ temporary credentials
+least-privilege IAM role
+    ↓
+Amazon ECR
+```
+
+The trust policy validates:
+
+- GitHub as the issuer;
+- `sts.amazonaws.com` as the audience;
+- immutable owner and repository IDs;
+- the exact repository;
+- the `main` branch.
+
+The role can publish only to the project's three ECR repositories.
+
+The image workflow:
+
+- runs for relevant changes on `main`;
+- supports manual execution;
+- uses a matrix for `vote`, `result` and `worker`;
+- gets temporary credentials through OIDC;
+- logs Docker into ECR;
+- creates commit-SHA tags;
+- checks whether an immutable tag exists;
+- builds missing images with Buildx;
+- uses GitHub Actions cache;
+- pushes and verifies images;
+- writes image URIs and digests to the run summary.
+
+## Amazon ECS foundation
+
+The current ECS layer creates:
+
+- a development ECS cluster;
+- `FARGATE`;
+- `FARGATE_SPOT`;
+- a default strategy using regular Fargate;
+- one CloudWatch Log Group per application service;
+- seven-day log retention;
+- a least-privilege Task Execution Role;
+- separate Task Roles for `vote`, `result` and `worker`.
+
+The Execution Role allows ECS/Fargate to:
+
+- obtain an ECR authorization token;
+- pull image manifests and layers;
+- create CloudWatch log streams;
+- send container log events.
+
+Application Task Roles currently have no AWS API permissions because the services do not call AWS APIs directly.
 
 ## Project structure
 
@@ -223,294 +446,128 @@ The same test is executed in GitHub Actions.
 ├── .github/
 │   └── workflows/
 ├── infra/
-│   └── bootstrap/
+│   ├── bootstrap/
+│   ├── shared/
+│   ├── environments/
+│   │   └── dev/
+│   └── modules/
 ├── result/
 ├── scripts/
 ├── vote/
 ├── worker/
 ├── docker-compose.yml
+├── docker-compose.images.yml
 ├── .env.example
 ├── LICENSE
 └── README.md
 ```
 
-### Important directories
+## Deployment lifecycle
 
-| Path                 | Description                                            |
-| -------------------- | ------------------------------------------------------ |
-| `vote/`              | Python voting application and its Docker image         |
-| `result/`            | Node.js results application and its Docker image       |
-| `worker/`            | .NET background worker and its Docker image            |
-| `scripts/`           | Local and CI integration test scripts                  |
-| `infra/bootstrap/`   | Terraform configuration for the remote state S3 bucket |
-| `.github/workflows/` | Continuous integration workflows                       |
-
-## Infrastructure as Code
-
-Terraform is used to manage AWS infrastructure.
-
-The first infrastructure component is a dedicated S3 bucket for Terraform state.
-
-The state bucket is configured with:
-
-* S3 versioning;
-* server-side encryption;
-* full S3 Block Public Access;
-* bucket owner enforced object ownership;
-* a bucket policy denying insecure transport;
-* Terraform protection against accidental destruction;
-* common project tags.
-
-The bootstrap configuration is located in:
+Persistent resources:
 
 ```text
-infra/bootstrap
+Terraform state bucket
+ECR repositories
+GitHub OIDC provider
+GitHub Actions IAM role
 ```
 
-The bootstrap state is initially stored locally because the remote backend bucket must exist before Terraform can use it.
-
-The main development environment will later store its state under:
+Temporary development resources:
 
 ```text
-environments/dev/terraform.tfstate
+VPC
+subnets
+NAT Gateway
+route tables
+security groups
+ECS cluster
+CloudWatch log groups
+ECS development roles
 ```
 
-## Project progress
+Typical workflow:
 
-### Phase 1 — Local baseline ✅
+```bash
+terraform -chdir=infra/environments/dev plan -out=tfplan
+terraform -chdir=infra/environments/dev apply tfplan
 
-The original application was forked, built, tested, and documented locally.
+# run tests
 
-Completed work includes:
-
-* configuring the project repository and upstream remote;
-* building and running the full Docker Compose stack;
-* verifying Redis and PostgreSQL data flow;
-* testing application logs and service communication;
-* adding a local end-to-end smoke test.
-
-### Phase 2 — Cloud-ready application ✅
-
-The application was prepared for future cloud deployment.
-
-Completed work includes:
-
-* externalizing Redis and PostgreSQL configuration;
-* removing hardcoded database credentials;
-* adding `.env.example`;
-* adding Docker build context exclusions;
-* adding liveness and readiness checks;
-* adding a worker heartbeat health check;
-* upgrading the worker to .NET 10;
-* adding automatic Compose integration testing;
-* replacing registry-dependent workflows with reproducible build checks.
-
-### Phase 3 — Terraform bootstrap 🚧
-
-Current infrastructure work includes:
-
-* creating the Terraform project structure;
-* configuring the AWS provider;
-* defining Terraform and provider version constraints;
-* creating a secure S3 bucket for Terraform state;
-* enabling versioning and encryption;
-* blocking all public access;
-* enforcing bucket ownership controls;
-* adding shared AWS resource tags;
-* documenting the bootstrap process.
-
-Next steps:
-
-* connect the development environment to the remote S3 backend;
-* enable native S3 state locking;
-* add Terraform validation and security checks to CI.
-
-### Phase 4 — AWS networking 📋
-
-Planned work:
-
-* VPC;
-* public application subnets;
-* private application subnets;
-* private database subnets;
-* Internet Gateway;
-* route tables;
-* security groups;
-* VPC Flow Logs;
-* a cost-aware development architecture without NAT Gateway;
-* documentation of a production Multi-AZ variant.
-
-### Phase 5 — EC2 and Ansible deployment 📋
-
-Planned work:
-
-* provisioning an EC2 instance with Terraform;
-* managing access through AWS Systems Manager;
-* avoiding public SSH access;
-* installing Docker with Ansible;
-* deploying the application through Docker Compose;
-* configuring CloudWatch Agent;
-* adding deployment, rollback, and troubleshooting procedures.
-
-### Phase 6 — ECR and CI/CD 📋
-
-Planned work:
-
-* creating separate ECR repositories for application images;
-* enabling image scanning and lifecycle policies;
-* tagging images with Git commit identifiers;
-* authenticating CI/CD to AWS using OIDC;
-* building, testing, scanning, and publishing application images;
-* automating Terraform plans and controlled deployments.
-
-### Phase 7 — Managed data services 📋
-
-Planned work:
-
-* migrating PostgreSQL to Amazon RDS;
-* migrating Redis to Amazon ElastiCache;
-* using private database subnets;
-* disabling public database access;
-* storing connection credentials securely;
-* testing data persistence and service recovery.
-
-### Phase 8 — ECS Fargate migration 📋
-
-Planned work:
-
-* deploying `vote`, `result`, and `worker` as independent ECS services;
-* adding an Application Load Balancer;
-* configuring ECS health checks and deployment rollback;
-* passing secrets securely to ECS tasks;
-* enabling ECS Exec and CloudWatch Logs;
-* adding service autoscaling.
-
-The EC2 implementation will remain documented as an alternative deployment architecture.
-
-### Phase 9 — Observability and operations 📋
-
-Planned work:
-
-* CloudWatch Logs and metrics;
-* application and infrastructure dashboards;
-* alarms and SNS notifications;
-* structured JSON logging;
-* correlation identifiers;
-* Container Insights;
-* local Grafana and VictoriaMetrics;
-* OpenTelemetry-based tracing;
-* operational runbooks.
-
-### Phase 10 — Security and reliability 📋
-
-Planned work:
-
-* HTTPS with AWS Certificate Manager;
-* least-privilege IAM policies;
-* dependency, container, secret, and IaC scanning;
-* backup and restore testing;
-* failure injection scenarios;
-* rollback testing;
-* load testing;
-* RTO and RPO documentation.
-
-### Phase 11 — Portfolio documentation 📋
-
-Planned work:
-
-* current and target architecture diagrams;
-* CI/CD diagrams;
-* deployment and teardown instructions;
-* AWS cost analysis;
-* infrastructure decisions;
-* troubleshooting guides;
-* operational runbooks;
-* load-test results;
-* monitoring screenshots;
-* lessons learned;
-* known limitations.
-
-## Planned AWS architecture
-
-The project will be developed incrementally.
-
-The initial AWS deployment will use EC2 and Docker Compose. It will later be migrated to ECS Fargate.
-
-```mermaid
-flowchart TB
-    Internet[Internet]
-
-    ALB[Application Load Balancer]
-
-    Vote[ECS service<br/>vote]
-    Result[ECS service<br/>result]
-    Worker[ECS service<br/>worker]
-
-    Redis[(Amazon ElastiCache<br/>Redis)]
-    Database[(Amazon RDS<br/>PostgreSQL)]
-
-    ECR[Amazon ECR]
-    Secrets[AWS Secrets Manager]
-    Logs[Amazon CloudWatch]
-    State[(Amazon S3<br/>Terraform state)]
-
-    Internet --> ALB
-    ALB --> Vote
-    ALB --> Result
-
-    Vote --> Redis
-    Redis --> Worker
-    Worker --> Database
-    Result --> Database
-
-    ECR --> Vote
-    ECR --> Result
-    ECR --> Worker
-
-    Secrets --> Vote
-    Secrets --> Result
-    Secrets --> Worker
-
-    Vote --> Logs
-    Result --> Logs
-    Worker --> Logs
-
-    State -. Terraform backend .-> Vote
+terraform -chdir=infra/environments/dev plan -destroy -out=tfplan-destroy
+terraform -chdir=infra/environments/dev apply tfplan-destroy
 ```
 
-This diagram represents the target architecture, not the current deployment state.
+Always review saved plans before applying them.
 
 ## Security principles
 
-The project follows these rules:
+- no AWS access keys in the repository;
+- CI/CD authentication through OIDC;
+- no hardcoded database passwords;
+- no committed `.env`;
+- no public access to Terraform state;
+- private application and data subnets;
+- no public Redis or PostgreSQL;
+- least-privilege IAM;
+- separate application Task Roles;
+- immutable image tags;
+- encrypted state and ECR repositories;
+- explicit log retention;
+- infrastructure managed through Terraform.
 
-* no AWS access keys stored in the repository;
-* no database passwords hardcoded in application source code;
-* no committed `.env` files;
-* no public access to Terraform state;
-* no public SSH access planned for EC2;
-* AWS access from CI/CD through temporary OIDC credentials;
-* managed secrets instead of plain-text production variables;
-* encrypted data storage;
-* least-privilege IAM as the target permission model;
-* immutable image tags for deployments.
+## Cost management
+
+- development infrastructure is destroyed after work sessions;
+- NAT Gateway deployment is configurable;
+- Container Insights remains disabled until needed;
+- CloudWatch Logs use short retention in `dev`;
+- ECR lifecycle policies remove old images;
+- Fargate tasks are not left running;
+- Fargate Spot is available for interruption-tolerant workloads.
+
+## Completed milestones
+
+- local Docker Compose baseline;
+- cloud-ready application configuration;
+- service health and readiness checks;
+- graceful shutdown and non-root containers;
+- automated application and integration tests;
+- secure Terraform remote state;
+- reusable Terraform modules;
+- Multi-AZ VPC and least-privilege security groups;
+- ECR repositories and lifecycle management;
+- GitHub Actions OIDC federation;
+- automated matrix builds and ECR publication;
+- ECS cluster foundation;
+- Fargate and Fargate Spot;
+- CloudWatch log groups;
+- ECS execution and application roles;
+- real AWS apply, verification and teardown testing.
+
+## Next milestones
+
+1. Deploy Amazon RDS PostgreSQL.
+2. Deploy Amazon ElastiCache Redis.
+3. Store credentials in AWS Secrets Manager.
+4. Create ECS task definitions.
+5. Run one-off Fargate tasks.
+6. Add an Application Load Balancer.
+7. Create ECS services.
+8. Extend GitHub Actions with ECS deployment.
+9. Add alarms, dashboards and rollback tests.
+10. Complete runbooks and portfolio documentation.
 
 ## Known limitations
 
-This application is based on a demonstration project and is not intended to represent a complete production voting system.
-
-Current limitations include:
-
-* one vote is accepted per browser identifier;
-* Redis lists provide only a simplified queue implementation;
-* a message may be lost if it is removed from Redis before a failed database write;
-* there is no dead-letter queue;
-* there is no full message acknowledgement mechanism;
-* browser identifiers are not a secure user identity mechanism;
-* the project does not currently provide strong delivery guarantees;
-* the application does not currently support user authentication.
-
-These limitations are intentional discussion points for future reliability improvements.
+- Redis lists provide a simplified queue;
+- messages can be lost between Redis removal and a failed database write;
+- there is no dead-letter queue;
+- there is no full acknowledgement mechanism;
+- browser identifiers are not secure user identities;
+- there is no user authentication;
+- ECS services and managed data services are not deployed yet;
+- the development environment prioritizes learning and cost control over production availability.
 
 ## Original project
 
@@ -518,7 +575,7 @@ This repository is based on Docker's Example Voting App:
 
 [github.com/dockersamples/example-voting-app](https://github.com/dockersamples/example-voting-app)
 
-The original application provides the distributed application workload. This repository extends it with cloud-ready configuration, health checks, automated integration testing, infrastructure as code, AWS deployment architecture, CI/CD, security practices, monitoring, and operational documentation.
+The original workload has been extended with cloud-ready configuration, health checks, automated integration testing, Terraform infrastructure, AWS networking, ECR, OIDC-based CI/CD, ECS foundations, security controls and operational documentation.
 
 ## License
 
