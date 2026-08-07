@@ -10,6 +10,8 @@ const io = require('socket.io')(server);
 
 const port = process.env.PORT || 4000;
 const dbPassword = process.env.DB_PASSWORD;
+const dbSsl =
+  (process.env.DB_SSL || 'false').toLowerCase() === 'true';
 
 if (!dbPassword) {
   throw new Error('DB_PASSWORD environment variable is required');
@@ -20,7 +22,10 @@ const pool = new Pool({
   port: Number.parseInt(process.env.DB_PORT || '5432', 10),
   database: process.env.DB_NAME || 'postgres',
   user: process.env.DB_USER || 'postgres',
-  password: dbPassword
+  password: dbPassword,
+  ssl: dbSsl
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 app.get('/health', function (request, response) {
@@ -65,7 +70,7 @@ async.retry(
   function (callback) {
     pool.connect(function (error, client) {
       if (error) {
-        console.error('Waiting for db');
+        console.error('Waiting for db: ' + error.message);
       }
 
       callback(error, client);
@@ -73,7 +78,7 @@ async.retry(
   },
   function (error, client) {
     if (error) {
-      return console.error('Giving up');
+      return console.error('Giving up: ' + error.message);
     }
 
     console.log('Connected to db');

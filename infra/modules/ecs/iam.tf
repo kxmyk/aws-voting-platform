@@ -21,7 +21,7 @@ resource "aws_iam_role" "task_execution" {
   name = "${var.name}-task-execution-role"
   path = "/ecs/"
 
-  description = "Allows Amazon ECS to pull application images and publish container logs."
+  description = "Allows Amazon ECS to pull application images, retrieve task secrets, and publish container logs."
 
   assume_role_policy    = data.aws_iam_policy_document.ecs_tasks_assume_role.json
   force_detach_policies = true
@@ -69,6 +69,25 @@ data "aws_iam_policy_document" "task_execution" {
     ]
 
     resources = local.log_stream_arns
+  }
+
+  dynamic "statement" {
+    for_each = (
+      length(var.secrets_manager_secret_arns) > 0
+      ? [1]
+      : []
+    )
+
+    content {
+      sid    = "ReadApplicationSecrets"
+      effect = "Allow"
+
+      actions = [
+        "secretsmanager:GetSecretValue"
+      ]
+
+      resources = var.secrets_manager_secret_arns
+    }
   }
 }
 

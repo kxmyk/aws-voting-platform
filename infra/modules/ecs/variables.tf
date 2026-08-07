@@ -41,11 +41,32 @@ variable "ecr_repository_arns" {
       length(var.ecr_repository_arns) > 0 &&
       alltrue([
         for repository_arn in var.ecr_repository_arns :
-        can(regex("^arn:aws:ecr:[a-z0-9-]+:[0-9]{12}:repository/.+$", repository_arn))
+        can(regex(
+          "^arn:aws:ecr:[a-z0-9-]+:[0-9]{12}:repository/.+$",
+          repository_arn
+        ))
       ])
     )
 
     error_message = "ecr_repository_arns must contain valid private ECR repository ARNs."
+  }
+}
+
+variable "secrets_manager_secret_arns" {
+  description = "Secrets Manager secret ARNs that the ECS task execution role may read."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for secret_arn in var.secrets_manager_secret_arns :
+      can(regex(
+        "^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$",
+        secret_arn
+      ))
+    ])
+
+    error_message = "secrets_manager_secret_arns must contain valid Secrets Manager ARNs."
   }
 }
 
