@@ -1,8 +1,6 @@
 using System;
 using System.Data.Common;
 using System.IO;
-using System.Linq;
-using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using Newtonsoft.Json;
@@ -59,6 +57,13 @@ namespace Worker
                     )
                 );
 
+                var redisTls = bool.Parse(
+                    GetEnvironmentVariable(
+                        "REDIS_TLS",
+                        "false"
+                    )
+                );
+
                 var dbConnectionString =
                     new NpgsqlConnectionStringBuilder
                     {
@@ -76,7 +81,8 @@ namespace Worker
                 var redisConnection =
                     OpenRedisConnection(
                         redisHost,
-                        redisPort
+                        redisPort,
+                        redisTls
                     );
 
                 var redis =
@@ -111,7 +117,8 @@ namespace Worker
                         redisConnection =
                             OpenRedisConnection(
                                 redisHost,
-                                redisPort
+                                redisPort,
+                                redisTls
                             );
 
                         redis =
@@ -342,28 +349,41 @@ namespace Worker
         private static ConnectionMultiplexer
             OpenRedisConnection(
                 string hostname,
-                int port
+                int port,
+                bool useTls
             )
         {
-            var ipAddress = GetIp(hostname);
-
             Console.WriteLine(
-                $"Found Redis at " +
-                $"{ipAddress}:{port}"
+                $"Connecting to Redis at " +
+                $"{hostname}:{port} " +
+                $"(TLS: {useTls})"
             );
 
             while (true)
             {
                 try
                 {
-                    Console.Error.WriteLine(
-                        "Connecting to Redis"
-                    );
+                    var configuration =
+                        new ConfigurationOptions
+                        {
+                            AbortOnConnectFail = true,
+                            Ssl = useTls,
+                            SslHost = useTls
+                                ? hostname
+                                : null,
+                            ConnectRetry = 3,
+                            ConnectTimeout = 5000
+                        };
+
+                    configuration
+                        .EndPoints
+                        .Add(
+                            hostname,
+                            port
+                        );
 
                     return ConnectionMultiplexer
-                        .Connect(
-                            $"{ipAddress}:{port}"
-                        );
+                        .Connect(configuration);
                 }
                 catch (RedisConnectionException)
                 {
@@ -374,22 +394,6 @@ namespace Worker
                     Thread.Sleep(1000);
                 }
             }
-        }
-
-        private static string GetIp(
-            string hostname
-        )
-        {
-            return Dns
-                .GetHostEntryAsync(hostname)
-                .Result
-                .AddressList
-                .First(
-                    address =>
-                        address.AddressFamily
-                        == AddressFamily.InterNetwork
-                )
-                .ToString();
         }
 
         private static void UpdateVote(
