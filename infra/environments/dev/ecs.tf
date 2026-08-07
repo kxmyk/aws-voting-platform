@@ -24,6 +24,10 @@ module "ecs" {
     values(local.ecs_ecr_repository_arns)
   )
 
+  secrets_manager_secret_arns = toset([
+    module.postgres.master_user_secret_arn
+  ])
+
   log_retention_days         = var.ecs_log_retention_days
   container_insights_enabled = var.ecs_container_insights_enabled
   enable_fargate_spot        = var.ecs_enable_fargate_spot
