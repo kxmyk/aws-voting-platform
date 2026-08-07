@@ -18,6 +18,13 @@ redis_socket_timeout = float(
     os.getenv("REDIS_SOCKET_TIMEOUT", "5")
 )
 
+redis_tls = (
+    os.getenv("REDIS_TLS", "false")
+    .strip()
+    .lower()
+    in {"1", "true", "yes", "on"}
+)
+
 hostname = socket.gethostname()
 
 app = Flask(__name__)
@@ -29,12 +36,23 @@ app.logger.setLevel(logging.INFO)
 
 def get_redis():
     if not hasattr(g, "redis"):
-        g.redis = Redis(
-            host=redis_host,
-            port=redis_port,
-            db=redis_db,
-            socket_timeout=redis_socket_timeout,
-        )
+        connection_options = {
+            "host": redis_host,
+            "port": redis_port,
+            "db": redis_db,
+            "socket_timeout": redis_socket_timeout,
+        }
+
+        if redis_tls:
+            connection_options.update(
+                {
+                    "ssl": True,
+                    "ssl_cert_reqs": "required",
+                    "ssl_check_hostname": True,
+                }
+            )
+
+        g.redis = Redis(**connection_options)
 
     return g.redis
 
