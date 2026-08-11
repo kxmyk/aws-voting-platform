@@ -26,6 +26,22 @@ locals {
       }
 
       secrets = {}
+
+      health_check = {
+        command = [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:80/ready"
+        ]
+
+        interval    = 10
+        timeout     = 5
+        retries     = 3
+        startPeriod = 30
+      }
     }
 
     result = {
@@ -41,6 +57,22 @@ locals {
 
       secrets = {
         DB_PASSWORD = local.postgres_password_secret
+      }
+
+      health_check = {
+        command = [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--show-error",
+          "http://localhost:80/ready"
+        ]
+
+        interval    = 10
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
       }
     }
 
@@ -60,6 +92,18 @@ locals {
 
       secrets = {
         DB_PASSWORD = local.postgres_password_secret
+      }
+
+      health_check = {
+        command = [
+          "CMD-SHELL",
+          "test -f /tmp/worker-health && test $(( $(date +%s) - $(cat /tmp/worker-health) )) -lt 30"
+        ]
+
+        interval    = 10
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
       }
     }
   }
@@ -97,6 +141,10 @@ resource "aws_ecs_task_definition" "service" {
         name      = each.key
         image     = data.aws_ecr_image.service[each.key].image_uri
         essential = true
+
+        stopTimeout = 30
+
+        healthCheck = each.value.health_check
 
         environment = [
           for environment_name, environment_value
