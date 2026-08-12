@@ -26,7 +26,7 @@ resource "aws_elasticache_replication_group" "this" {
   num_cache_clusters = 1
 
   automatic_failover_enabled = false
-  multi_az_enabled            = false
+  multi_az_enabled           = false
 
   subnet_group_name = aws_elasticache_subnet_group.this.name
 
@@ -42,7 +42,7 @@ resource "aws_elasticache_replication_group" "this" {
   snapshot_retention_limit = var.snapshot_retention_limit
 
   auto_minor_version_upgrade = true
-  apply_immediately           = var.apply_immediately
+  apply_immediately          = var.apply_immediately
 
   maintenance_window = "sun:04:00-sun:05:00"
 
