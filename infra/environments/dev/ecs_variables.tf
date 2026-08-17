@@ -66,7 +66,7 @@ variable "ecs_enable_fargate_spot" {
 variable "ecs_bootstrap_image_tag" {
   description = "Immutable ECR image tag used for the initial ECS task definition revisions."
   type        = string
-  default     = "sha-574373bfdd41"
+  default     = "sha-3caed76407b2"
 
   validation {
     condition = can(regex(

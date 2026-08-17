@@ -1,0 +1,153 @@
+name: Deploy images to Amazon ECS
+
+on:
+  workflow_run:
+    workflows:
+      - Publish images to Amazon ECR
+    types:
+      - completed
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full source commit SHA identifying immutable ECR images
+        required: true
+        type: string
+
+      service:
+        description: ECS service to deploy
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - vote
+          - result
+          - worker
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ecs-deploy-dev
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  prepare:
+    name: Prepare deployment
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && vars.ECS_AUTO_DEPLOY == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      services: ${{ steps.resolve.outputs.services }}
+
+    steps:
+      - name: Resolve deployment parameters
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_SOURCE_SHA: ${{ inputs.source_sha }}
+          DISPATCH_SERVICE: ${{ inputs.service }}
+          WORKFLOW_RUN_SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            SOURCE_SHA="${DISPATCH_SOURCE_SHA}"
+            SELECTED_SERVICE="${DISPATCH_SERVICE}"
+          else
+            SOURCE_SHA="${WORKFLOW_RUN_SOURCE_SHA}"
+            SELECTED_SERVICE="all"
+          fi
+
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Source SHA must contain exactly 40 lowercase hexadecimal characters."
+            exit 1
+          fi
+
+          case "${SELECTED_SERVICE}" in
+            all)
+              SERVICES='["vote","result","worker"]'
+              ;;
+            vote|result|worker)
+              SERVICES="[\"${SELECTED_SERVICE}\"]"
+              ;;
+            *)
+              echo "Unsupported ECS service: ${SELECTED_SERVICE}"
+              exit 1
+              ;;
+          esac
+
+          echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "services=${SERVICES}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "## Deployment request"
+            echo
+            echo "- Source commit: \`${SOURCE_SHA}\`"
+            echo "- Services: \`${SERVICES}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy:
+    name: Deploy ${{ matrix.service }}
+    needs:
+      - prepare
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.prepare.outputs.services) }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate workflow configuration
+        shell: bash
+        env:
+          AWS_ECS_DEPLOY_ROLE_ARN: ${{ vars.AWS_ECS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${AWS_ECS_DEPLOY_ROLE_ARN}" ]]; then
+            echo "GitHub repository variable AWS_ECS_DEPLOY_ROLE_ARN is not configured."
+            exit 1
+          fi
+
+      - name: Configure temporary AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ECS_DEPLOY_ROLE_ARN }}
+          role-session-name: ecs-deploy-${{ matrix.service }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Verify AWS identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          aws sts get-caller-identity
+
+      - name: Deploy immutable image
+        shell: bash
+        env:
+          SERVICE_NAME: ${{ matrix.service }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -Eeuo pipefail
+
+          bash scripts/deploy-ecs-service.sh \
+            "${SERVICE_NAME}" \
+            "${SOURCE_SHA}"
