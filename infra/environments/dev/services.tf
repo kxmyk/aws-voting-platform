@@ -31,10 +31,14 @@ module "ecs_service" {
 
   source = "../../modules/ecs-service"
 
-  name                = "${var.project_name}-${var.environment}-${each.key}"
-  cluster_id          = module.ecs.cluster_id
-  task_definition_arn = aws_ecs_task_definition.service[each.key].arn
-  desired_count       = var.ecs_service_desired_counts[each.key]
+  name       = "${var.project_name}-${var.environment}-${each.key}"
+  cluster_id = module.ecs.cluster_id
+
+  task_definition_arn = (
+    data.aws_ecs_task_definition.active_service[each.key].arn
+  )
+
+  desired_count = var.ecs_service_desired_counts[each.key]
 
   subnet_ids = toset(
     values(module.network.private_app_subnet_ids)
