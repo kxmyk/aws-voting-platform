@@ -92,22 +92,25 @@ jobs:
           REPOSITORY="${ECR_NAMESPACE}/${SERVICE_NAME}"
           IMAGE_URI="${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}"
 
-          echo "tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "repository=${REPOSITORY}" >> "${GITHUB_OUTPUT}"
-          echo "uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
-
           if aws ecr describe-images \
             --region "${AWS_REGION}" \
             --repository-name "${REPOSITORY}" \
             --image-ids "imageTag=${IMAGE_TAG}" \
             > /dev/null 2>&1; then
 
-            echo "exists=true" >> "${GITHUB_OUTPUT}"
+            EXISTS="true"
             echo "Image already exists: ${IMAGE_URI}"
           else
-            echo "exists=false" >> "${GITHUB_OUTPUT}"
+            EXISTS="false"
             echo "Image will be built and published: ${IMAGE_URI}"
           fi
+
+          {
+            echo "tag=${IMAGE_TAG}"
+            echo "repository=${REPOSITORY}"
+            echo "uri=${IMAGE_URI}"
+            echo "exists=${EXISTS}"
+          } >> "${GITHUB_OUTPUT}"
 
       - name: Set up Docker Buildx
         if: steps.image.outputs.exists != 'true'

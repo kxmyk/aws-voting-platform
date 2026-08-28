@@ -53,6 +53,9 @@ resource "aws_lb_target_group" "this" {
   })
 }
 
+# This temporary portfolio environment intentionally uses the generated ALB DNS name over HTTP.
+# HTTPS requires a custom domain, which is intentionally outside the project's cost scope.
+#trivy:ignore:AWS-0054
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.this.arn
 

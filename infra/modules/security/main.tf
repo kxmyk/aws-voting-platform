@@ -183,6 +183,9 @@ resource "aws_vpc_security_group_egress_rule" "worker_to_postgres" {
   to_port                      = var.postgres_port
 }
 
+# ECS tasks require public HTTPS egress through NAT for AWS service endpoints.
+# Paid interface VPC endpoints are intentionally outside this temporary dev environment.
+#trivy:ignore:AWS-0104
 resource "aws_vpc_security_group_egress_rule" "vote_https" {
   security_group_id = aws_security_group.vote.id
   description       = "Allow outbound HTTPS traffic from the vote application."
@@ -193,6 +196,9 @@ resource "aws_vpc_security_group_egress_rule" "vote_https" {
   to_port     = var.https_port
 }
 
+# ECS tasks require public HTTPS egress through NAT for AWS service endpoints.
+# Paid interface VPC endpoints are intentionally outside this temporary dev environment.
+#trivy:ignore:AWS-0104
 resource "aws_vpc_security_group_egress_rule" "result_https" {
   security_group_id = aws_security_group.result.id
   description       = "Allow outbound HTTPS traffic from the result application."
@@ -203,6 +209,9 @@ resource "aws_vpc_security_group_egress_rule" "result_https" {
   to_port     = var.https_port
 }
 
+# ECS tasks require public HTTPS egress through NAT for AWS service endpoints.
+# Paid interface VPC endpoints are intentionally outside this temporary dev environment.
+#trivy:ignore:AWS-0104
 resource "aws_vpc_security_group_egress_rule" "worker_https" {
   security_group_id = aws_security_group.worker.id
   description       = "Allow outbound HTTPS traffic from the worker."

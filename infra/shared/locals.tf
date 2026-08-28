@@ -7,8 +7,6 @@ locals {
     Owner       = "Kamil"
   }
 
-  github_repository_full_name = "${var.github_owner}/${var.github_repository}"
-
   github_oidc_subjects = [
     for branch in sort(tolist(var.github_allowed_branches)) :
     join("", [
