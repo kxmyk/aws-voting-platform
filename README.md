@@ -24,11 +24,13 @@ Repository: [github.com/kxmyk/aws-voting-platform](https://github.com/kxmyk/aws-
 | Amazon RDS PostgreSQL and ElastiCache Redis | Complete |
 | ECS Task Definitions and ECS Services | Complete |
 | Application Load Balancer | Complete |
-| Immutable ECS deployment workflow | Implemented; final GitHub-hosted E2E verification pending |
-| Route 53, ACM and HTTPS | Next milestone |
-| Full observability and reliability testing | Planned |
+| Immutable ECS deployment workflow | Complete; GitHub-hosted E2E verified |
+| ECS self-healing and circuit-breaker rollback | Complete |
+| Terraform no-drift verification and final teardown | Complete |
+| Route 53, ACM and HTTPS | Deliberately out of scope |
+| Advanced observability | Deliberately out of scope |
 
-The development environment has been applied and tested in AWS, including the complete vote flow. It is intentionally destroyed after test sessions to limit costs. Persistent shared resources use separate Terraform states.
+The development environment was recreated and verified end to end in AWS, then destroyed to stop runtime costs. The final test covered GitHub-hosted image publishing and deployment, the complete vote flow, worker self-healing, ECS circuit-breaker rollback, Terraform no-drift and cleanup. Persistent shared resources use separate Terraform states.
 
 ## Project goals
 
@@ -268,7 +270,7 @@ Security groups allow only the required service paths:
 - `result` and `worker` -> PostgreSQL on port 5432;
 - application tasks -> HTTPS endpoints required for AWS service access.
 
-Route 53, an ACM certificate, port 443 and HTTP-to-HTTPS redirection are the next networking and security milestone.
+A custom domain, Route 53, ACM and HTTPS were deliberately left out to avoid domain registration and ongoing Hosted Zone costs. The temporary test endpoint therefore uses the generated ALB DNS name over HTTP.
 
 ### Data layer
 
@@ -535,7 +537,7 @@ Cost controls include:
 - Container Insights disabled until its cost is evaluated;
 - persistent resources isolated in `bootstrap` and `shared` states.
 
-Future Route 53 Hosted Zone charges will continue while the development environment is destroyed. Domain registration is a separate annual cost.
+No domain or Route 53 Hosted Zone was created, so the completed project has no related recurring charge.
 
 ## Completed milestones
 
@@ -550,31 +552,45 @@ Future Route 53 Hosted Zone charges will continue while the development environm
 - encrypted private RDS PostgreSQL and ElastiCache Redis;
 - Fargate Task Definitions and ECS Services;
 - public Application Load Balancer with health checks and path routing;
-- deployment circuit breaker and ECS rollback configuration;
+- deployment circuit breaker with verified ECS rollback;
 - immutable digest-based ECS deployment script and GitHub Actions workflow;
-- real AWS apply, application verification, no-drift planning and teardown tests.
+- GitHub-hosted publication and deployment of all three services;
+- complete `vote -> Redis -> worker -> PostgreSQL -> result` verification;
+- worker self-healing test with automatic task replacement;
+- Terraform no-drift verification after the CI deployment;
+- final development-environment teardown and Task Definition cleanup.
 
-## Next milestones
+## Final AWS verification
 
-1. Run the complete ECR-to-ECS deployment from a GitHub-hosted runner against a freshly created environment.
-2. Verify the application flow and a no-change Terraform plan after the CI-created Task Definition revisions.
-3. Add a custom domain, Route 53 DNS, an ACM certificate, HTTPS and HTTP-to-HTTPS redirection.
-4. Add post-deployment application smoke tests and verify rollback behavior.
-5. Add VPC Flow Logs, ALB access logs, CloudWatch dashboards, alarms and SNS notifications.
-6. Add automated Terraform, shell and IaC security checks to pull requests.
-7. Test backup restore, controlled service failures and operational runbooks.
-8. Update final diagrams and evidence, then publish a `v1.0.0` portfolio release.
+The final test cycle was performed against a freshly created `dev` environment.
+
+| Check | Result |
+| --- | --- |
+| Publish all three images from GitHub Actions | Pass |
+| Deploy all three services using immutable image digests | Pass |
+| Complete vote flow through Redis, worker and PostgreSQL | Pass |
+| Replace a stopped worker task without changing its Task Definition | Pass |
+| Roll back a deliberately broken `vote` deployment | Pass |
+| Availability during rollback | 53 probes, 0 failed responses |
+| Terraform plan after deployment and rollback | 0 managed changes |
+| Final Terraform destroy | 74 temporary resources destroyed |
+| Development Terraform state | Empty |
+| GitHub Actions Task Definition cleanup | 3 deregistered, 0 active remaining |
+
+Three ECR repositories and the persistent `bootstrap` and `shared` Terraform states remain intentionally. `ECS_AUTO_DEPLOY` is set to `false` while no development environment exists.
+
+The project is considered feature-complete. Additional production-oriented capabilities are documented below as known limitations rather than unfinished requirements.
 
 ## Known limitations
 
 - the project currently implements only a temporary `dev` environment;
-- the public endpoint currently uses HTTP and the generated ALB DNS name;
+- the public endpoint uses HTTP and the generated ALB DNS name because a paid domain was intentionally not added;
 - the default network uses one NAT Gateway and is not highly available across NAT failure;
 - RDS uses a single-AZ development configuration;
 - Redis uses one cache node without automatic failover;
 - each ECS service runs one task by default;
-- Container Insights, VPC Flow Logs and ALB access logs are not enabled yet;
-- the deployment workflow does not yet execute an application-level post-deployment smoke test;
+- Container Insights, VPC Flow Logs and ALB access logs are outside the completed project scope;
+- the deployment workflow does not execute an automatic application-level smoke test; the final smoke test was run manually;
 - Terraform currently reconciles services with the latest active Task Definition family revision, which requires additional hardening around failed orphan revisions;
 - Redis lists are a simplified queue without a dead-letter queue or full acknowledgement mechanism;
 - browser identifiers are not secure user identities and the application has no authentication;
